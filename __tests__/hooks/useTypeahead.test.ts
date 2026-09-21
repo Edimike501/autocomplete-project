@@ -228,12 +228,47 @@ describe('useTypeahead hook', () => {
     });
     expect(result.current.results[0]?.name).toBe('Lagos');
 
-    // Advance remaining 340ms for slow "lag" response to resolve second
+    // Advance remaining 350ms for slow "lag" response to complete
     await act(async () => {
       await vi.advanceTimersByTimeAsync(350);
     });
 
-    // The results MUST still belong to "Lagos" (latest query), NOT overwritten by "Lag"
+    // Results MUST remain "Lagos"
     expect(result.current.results[0]?.name).toBe('Lagos');
+  });
+
+  it('aborts active fetch request on unmount without throwing or setting error state', async () => {
+    let requestAborted = false;
+
+    server.use(
+      http.get('*/api/places', async ({ request }) => {
+        request.signal.addEventListener('abort', () => {
+          requestAborted = true;
+        });
+        await delay(500);
+        return HttpResponse.json([
+          { id: 1, name: 'London', lat: 51.5, lon: -0.1 },
+        ]);
+      })
+    );
+
+    const { result, unmount } = renderHook(() => useTypeahead({ debounceMs: 100 }));
+
+    act(() => {
+      result.current.setQuery('London');
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    // Unmount hook while request is still pending
+    unmount();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+
+    expect(requestAborted).toBe(true);
   });
 });
