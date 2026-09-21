@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, delay } from 'msw';
 import { server } from '../mocks/server';
 import { useTypeahead } from '@/hooks/useTypeahead';
 
@@ -93,7 +93,7 @@ describe('useTypeahead hook', () => {
 
   it('handles empty status transition when API returns no results', async () => {
     server.use(
-      http.get('/api/places', () => {
+      http.get('*/api/places', () => {
         return HttpResponse.json([]);
       })
     );
@@ -115,7 +115,7 @@ describe('useTypeahead hook', () => {
 
   it('handles error status transition when API returns a 502 error', async () => {
     server.use(
-      http.get('/api/places', () => {
+      http.get('*/api/places', () => {
         return HttpResponse.json(
           { error: 'Upstream geocoding service returned an error.' },
           { status: 502 }
@@ -141,7 +141,7 @@ describe('useTypeahead hook', () => {
   it('retries fetching results when retry() is called', async () => {
     let attempts = 0;
     server.use(
-      http.get('/api/places', () => {
+      http.get('*/api/places', () => {
         attempts++;
         if (attempts === 1) {
           return HttpResponse.json(
@@ -176,5 +176,64 @@ describe('useTypeahead hook', () => {
     expect(result.current.status).toBe('success');
     expect(result.current.results.length).toBe(1);
     expect(result.current.error).toBeNull();
+  });
+
+  it('ignores slow out-of-order response when a newer fast response arrives first', async () => {
+    server.use(
+      http.get('*/api/places', async ({ request }) => {
+        const url = new URL(request.url);
+        const q = url.searchParams.get('q');
+
+        if (q === 'lag') {
+          // Slow response for "lag" (takes 500ms)
+          await delay(500);
+          return HttpResponse.json([
+            { id: 101, name: 'Lag', country: 'Germany', lat: 48.0, lon: 11.0 },
+          ]);
+        }
+
+        if (q === 'lagos') {
+          // Fast response for "lagos" (takes 50ms)
+          await delay(50);
+          return HttpResponse.json([
+            { id: 102, name: 'Lagos', country: 'Nigeria', lat: 6.5, lon: 3.37 },
+          ]);
+        }
+
+        return HttpResponse.json([]);
+      })
+    );
+
+    const { result } = renderHook(() => useTypeahead({ debounceMs: 100 }));
+
+    // User types "lag"
+    act(() => {
+      result.current.setQuery('lag');
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    // User updates query to "lagos"
+    act(() => {
+      result.current.setQuery('lagos');
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    // Advance 60ms for "lagos" response to resolve first
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60);
+    });
+    expect(result.current.results[0]?.name).toBe('Lagos');
+
+    // Advance remaining 340ms for slow "lag" response to resolve second
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(350);
+    });
+
+    // The results MUST still belong to "Lagos" (latest query), NOT overwritten by "Lag"
+    expect(result.current.results[0]?.name).toBe('Lagos');
   });
 });
