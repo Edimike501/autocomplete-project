@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw';
-import type { OpenMeteoResponse } from '@/types/places';
+import type { OpenMeteoResponse, Place } from '@/types/places';
 
 export const OPEN_METEO_BASE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 
@@ -24,7 +24,40 @@ export const mockGeocodingResponse: OpenMeteoResponse = {
   ],
 };
 
+export const mockPlacesResponse: Place[] = [
+  {
+    id: 2643743,
+    name: 'London',
+    admin1: 'England',
+    country: 'United Kingdom',
+    lat: 51.50853,
+    lon: -0.12574,
+  },
+  {
+    id: 5128581,
+    name: 'New York',
+    admin1: 'New York',
+    country: 'United States',
+    lat: 40.71427,
+    lon: -74.00597,
+  },
+];
+
 export const handlers = [
+  http.get('*/api/places', ({ request }) => {
+    const url = new URL(request.url);
+    const q = url.searchParams.get('q');
+
+    if (!q || q.trim().length < 2) {
+      return HttpResponse.json(
+        { error: 'Query parameter "q" must be between 2 and 100 characters.' },
+        { status: 400 }
+      );
+    }
+
+    return HttpResponse.json(mockPlacesResponse);
+  }),
+
   http.get(OPEN_METEO_BASE_URL, ({ request }) => {
     const url = new URL(request.url);
     const name = url.searchParams.get('name');
