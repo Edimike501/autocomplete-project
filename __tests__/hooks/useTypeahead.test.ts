@@ -3,6 +3,8 @@ import { renderHook, act } from '@testing-library/react';
 import { http, HttpResponse, delay } from 'msw';
 import { server } from '../mocks/server';
 import { useTypeahead } from '@/hooks/useTypeahead';
+import { createDeferred } from '../utils/deferred';
+import type { Place } from '@/types/places';
 
 describe('useTypeahead hook', () => {
   beforeEach(() => {
@@ -23,10 +25,11 @@ describe('useTypeahead hook', () => {
     expect(result.current.error).toBeNull();
   });
 
-  it('does not trigger fetch when query is under minimum character threshold (2 chars)', async () => {
+  it('does not trigger fetch when query is empty or under minChars threshold', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const { result } = renderHook(() => useTypeahead({ minChars: 2 }));
 
+    // Single character query
     act(() => {
       result.current.setQuery('a');
     });
@@ -38,6 +41,18 @@ describe('useTypeahead hook', () => {
     expect(result.current.status).toBe('idle');
     expect(result.current.results).toEqual([]);
     expect(fetchSpy).not.toHaveBeenCalled();
+
+    // Reset to empty string query
+    act(() => {
+      result.current.setQuery('');
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(result.current.status).toBe('idle');
+    expect(result.current.results).toEqual([]);
   });
 
   it('debounces rapid typing and triggers exactly one API request after delay', async () => {
@@ -138,7 +153,7 @@ describe('useTypeahead hook', () => {
     expect(result.current.error).toBe('Upstream geocoding service returned an error.');
   });
 
-  it('retries fetching results when retry() is called', async () => {
+  it('retries fetching latest valid query when retry() is called', async () => {
     let attempts = 0;
     server.use(
       http.get('*/api/places', () => {
@@ -178,26 +193,23 @@ describe('useTypeahead hook', () => {
     expect(result.current.error).toBeNull();
   });
 
-  it('ignores slow out-of-order response when a newer fast response arrives first', async () => {
+  it('ignores slow out-of-order response when a newer fast response resolves first using deferred helper', async () => {
+    const lagDeferred = createDeferred<Place[]>();
+    const lagosDeferred = createDeferred<Place[]>();
+
     server.use(
       http.get('*/api/places', async ({ request }) => {
         const url = new URL(request.url);
         const q = url.searchParams.get('q');
 
         if (q === 'lag') {
-          // Slow response for "lag" (takes 500ms)
-          await delay(500);
-          return HttpResponse.json([
-            { id: 101, name: 'Lag', country: 'Germany', lat: 48.0, lon: 11.0 },
-          ]);
+          const data = await lagDeferred.promise;
+          return HttpResponse.json(data);
         }
 
         if (q === 'lagos') {
-          // Fast response for "lagos" (takes 50ms)
-          await delay(50);
-          return HttpResponse.json([
-            { id: 102, name: 'Lagos', country: 'Nigeria', lat: 6.5, lon: 3.37 },
-          ]);
+          const data = await lagosDeferred.promise;
+          return HttpResponse.json(data);
         }
 
         return HttpResponse.json([]);
@@ -222,15 +234,20 @@ describe('useTypeahead hook', () => {
       await vi.advanceTimersByTimeAsync(100);
     });
 
-    // Advance 60ms for "lagos" response to resolve first
+    // Resolve "lagos" response first
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(60);
+      lagosDeferred.resolve([
+        { id: 102, name: 'Lagos', country: 'Nigeria', lat: 6.5, lon: 3.37 },
+      ]);
     });
+
     expect(result.current.results[0]?.name).toBe('Lagos');
 
-    // Advance remaining 350ms for slow "lag" response to complete
+    // Resolve slow "lag" response second
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(350);
+      lagDeferred.resolve([
+        { id: 101, name: 'Lag', country: 'Germany', lat: 48.0, lon: 11.0 },
+      ]);
     });
 
     // Results MUST remain "Lagos"
@@ -262,7 +279,7 @@ describe('useTypeahead hook', () => {
       await vi.advanceTimersByTimeAsync(100);
     });
 
-    // Unmount hook while request is still pending
+    // Unmount hook while request is pending
     unmount();
 
     await act(async () => {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { Place, ApiErrorResponse } from '@/types/places';
+import type { Place } from '@/types/places';
+import { fetchPlaces } from '@/lib/api';
 
 export type TypeaheadStatus = 'idle' | 'loading' | 'success' | 'empty' | 'error';
 
@@ -66,31 +67,9 @@ export function useTypeahead(options: UseTypeaheadOptions = {}): UseTypeaheadRet
     setError(null);
 
     try {
-      const response = await fetch(`/api/places?q=${encodeURIComponent(trimmed)}`, {
-        signal: controller.signal,
-      });
+      const data = await fetchPlaces(trimmed, controller.signal);
 
       // Guard: Ignore response if a newer request has been triggered or request was aborted
-      if (currentRequestId !== requestIdRef.current || controller.signal.aborted) {
-        return;
-      }
-
-      if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as ApiErrorResponse;
-
-        if (currentRequestId !== requestIdRef.current || controller.signal.aborted) {
-          return;
-        }
-
-        setResults([]);
-        setStatus('error');
-        setError(errorData.error || 'Failed to fetch places.');
-        return;
-      }
-
-      const data = (await response.json()) as Place[];
-
-      // Guard check after async JSON parsing
       if (currentRequestId !== requestIdRef.current || controller.signal.aborted) {
         return;
       }
@@ -104,15 +83,16 @@ export function useTypeahead(options: UseTypeaheadOptions = {}): UseTypeaheadRet
         setStatus('empty');
         setError(null);
       }
-    } catch {
+    } catch (err) {
       // Ignore errors for aborted or superseded requests
       if (currentRequestId !== requestIdRef.current || controller.signal.aborted) {
         return;
       }
 
+      const errorMessage = err instanceof Error ? err.message : 'Network error occurred.';
       setResults([]);
       setStatus('error');
-      setError('Network error occurred.');
+      setError(errorMessage);
     }
   }, [minChars]);
 

@@ -2,7 +2,7 @@
  * Normalized place item returned to the client application.
  */
 export interface Place {
-  id: number;
+  id: string | number;
   name: string;
   admin1?: string;
   country?: string;
