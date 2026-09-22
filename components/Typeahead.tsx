@@ -141,6 +141,7 @@ export function Typeahead({
       }
       case 'Escape': {
         event.preventDefault();
+        setQuery('');
         setIsOpen(false);
         setSelectedIndex(-1);
         break;
