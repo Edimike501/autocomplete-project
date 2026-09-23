@@ -5,12 +5,12 @@ import { Typeahead } from '@/components/Typeahead';
 
 export default function HomePage() {
   return (
-    <main style={{ minHeight: '100vh', backgroundColor: '#f8fafc', padding: '3rem 1rem', boxSizing: 'border-box' }}>
-      <div style={{ maxWidth: '36rem', margin: '0 auto', textAlign: 'center', marginBottom: '2rem' }}>
-        <h1 style={{ fontSize: '1.875rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.5rem' }}>
+    <main className="min-h-screen bg-slate-50 px-4 py-12 sm:px-6 sm:py-16">
+      <div className="mx-auto max-w-xl text-center mb-8">
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900 mb-2">
           Property Location Search
         </h1>
-        <p style={{ fontSize: '1rem', color: '#64748b', margin: 0 }}>
+        <p className="text-base text-slate-600">
           Search for cities and towns across Nigeria and worldwide.
         </p>
       </div>

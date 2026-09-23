@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useTypeahead } from '@/hooks/useTypeahead';
 import type { Place } from '@/types/places';
-import styles from './Typeahead.module.css';
 
 export interface TypeaheadProps {
   onSelect?: (place: Place) => void;
@@ -32,7 +31,10 @@ function HighlightText({ text, query }: { text: string; query: string }) {
     <>
       {parts.map((part, index) =>
         part.toLowerCase() === trimmed.toLowerCase() ? (
-          <span key={index} className={styles.matchHighlight}>
+          <span
+            key={index}
+            className="font-bold text-emerald-700 bg-emerald-100/70 rounded-xs px-0.5"
+          >
             {part}
           </span>
         ) : (
@@ -171,18 +173,18 @@ export function Typeahead({
       : undefined;
 
   return (
-    <div ref={containerRef} className={styles.container}>
-      <label htmlFor="typeahead-input" className={styles.label}>
+    <div ref={containerRef} className="flex flex-col gap-4 w-full max-w-lg mx-auto text-slate-800">
+      <label htmlFor="typeahead-input" className="text-sm font-semibold text-slate-700">
         {label}
       </label>
 
-      <div className={styles.comboboxWrapper}>
+      <div className="relative w-full">
         <input
           ref={inputRef}
           id="typeahead-input"
           type="text"
           role="combobox"
-          className={styles.input}
+          className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-base text-slate-900 shadow-xs outline-none transition placeholder:text-slate-400 focus-visible:border-emerald-600 focus-visible:ring-2 focus-visible:ring-emerald-600/30"
           placeholder={placeholder}
           value={query}
           onChange={(e) => {
@@ -205,29 +207,41 @@ export function Typeahead({
         />
 
         {/* Visually hidden live region for screen readers */}
-        <div className={styles.visuallyHidden} aria-live="polite" aria-atomic="true">
+        <div className="sr-only" aria-live="polite" aria-atomic="true">
           {getAnnouncementText()}
         </div>
 
         {/* Combobox Dropdown Results */}
         {isOpen && (
-          <ul id="typeahead-listbox" role="listbox" className={styles.dropdown} aria-label="Place suggestions">
+          <ul
+            id="typeahead-listbox"
+            role="listbox"
+            className="absolute top-[calc(100%+0.375rem)] left-0 right-0 z-50 max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1.5 shadow-lg list-none m-0"
+            aria-label="Place suggestions"
+          >
             {status === 'loading' && (
-              <li className={styles.statusMessage} role="status">
+              <li className="p-4 text-sm text-slate-500 text-center" role="status">
                 Loading places...
               </li>
             )}
 
             {status === 'empty' && (
-              <li className={styles.statusMessage} role="status">
+              <li className="p-4 text-sm text-slate-500 text-center" role="status">
                 No places found for &quot;{query}&quot;
               </li>
             )}
 
             {status === 'error' && (
-              <li className={styles.errorMessage} role="alert">
+              <li
+                className="flex items-center justify-between gap-3 p-3.5 text-sm text-red-700 bg-red-50 border-y sm:border sm:rounded-md border-red-100"
+                role="alert"
+              >
                 <span>{error || 'An error occurred while fetching places.'}</span>
-                <button type="button" className={styles.retryButton} onClick={() => retry()}>
+                <button
+                  type="button"
+                  className="px-2.5 py-1 text-xs font-semibold text-red-700 bg-white border border-red-300 rounded hover:bg-red-100 transition cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+                  onClick={() => retry()}
+                >
                   Retry
                 </button>
               </li>
@@ -244,7 +258,11 @@ export function Typeahead({
                     id={`typeahead-option-${index}`}
                     role="option"
                     aria-selected={isSelected}
-                    className={`${styles.option} ${isSelected ? styles.optionSelected : ''}`}
+                    className={`flex flex-col gap-0.5 px-4 py-2.5 cursor-pointer select-none transition border-l-3 ${
+                      isSelected
+                        ? 'bg-emerald-50 text-emerald-950 border-emerald-600 font-medium'
+                        : 'text-slate-700 border-transparent hover:bg-slate-50'
+                    }`}
                     onMouseEnter={() => setSelectedIndex(index)}
                     onMouseDown={(e) => {
                       // Prevent input blur before click selection executes
@@ -252,10 +270,10 @@ export function Typeahead({
                     }}
                     onClick={() => handleSelectPlace(place)}
                   >
-                    <span className={styles.optionName}>
+                    <span className="text-[0.9375rem] font-medium text-slate-900">
                       <HighlightText text={place.name} query={query} />
                     </span>
-                    {metaText && <span className={styles.optionMeta}>{metaText}</span>}
+                    {metaText && <span className="text-xs text-slate-500">{metaText}</span>}
                   </li>
                 );
               })}
@@ -265,13 +283,19 @@ export function Typeahead({
 
       {/* Selected Location Card */}
       {selectedPlace && (
-        <div className={styles.selectedCard} data-testid="selected-place-card">
-          <div className={styles.selectedTitle}>Selected Location</div>
-          <div className={styles.selectedName}>{selectedPlace.name}</div>
-          <div className={styles.selectedDetails}>
-            {[selectedPlace.admin1, selectedPlace.country].filter(Boolean).join(', ') || 'No regional metadata'}
+        <div
+          className="mt-2 p-4 bg-white border border-slate-200 rounded-lg flex flex-col gap-1.5 shadow-xs"
+          data-testid="selected-place-card"
+        >
+          <div className="text-xs font-bold uppercase tracking-wider text-emerald-700">
+            Selected Location
           </div>
-          <div className={styles.selectedDetails}>
+          <div className="text-lg font-semibold text-slate-900">{selectedPlace.name}</div>
+          <div className="text-sm text-slate-600">
+            {[selectedPlace.admin1, selectedPlace.country].filter(Boolean).join(', ') ||
+              'No regional metadata'}
+          </div>
+          <div className="text-sm text-slate-600">
             Coordinates: {selectedPlace.lat.toFixed(4)}, {selectedPlace.lon.toFixed(4)}
           </div>
         </div>
