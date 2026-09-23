@@ -18,6 +18,8 @@ export interface UseTypeaheadReturn {
   retry: () => void;
 }
 
+const MAX_CACHE_SIZE = 50;
+
 export function useTypeahead(options: UseTypeaheadOptions = {}): UseTypeaheadReturn {
   const { debounceMs = 300, minChars = 2 } = options;
 
@@ -26,6 +28,9 @@ export function useTypeahead(options: UseTypeaheadOptions = {}): UseTypeaheadRet
   const [results, setResults] = useState<Place[]>([]);
   const [status, setStatus] = useState<TypeaheadStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+
+  // Bounded client-side LRU cache storing successful Place[] results keyed by normalized query
+  const cacheRef = useRef<Map<string, Place[]>>(new Map());
 
   // Track in-flight AbortController and monotonic request sequence ID
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -45,6 +50,7 @@ export function useTypeahead(options: UseTypeaheadOptions = {}): UseTypeaheadRet
   // Execute fetch for debouncedQuery with abort & request ID guards
   const executeFetch = useCallback(async (searchQuery: string) => {
     const trimmed = searchQuery.trim();
+    const normalizedKey = trimmed.toLowerCase();
 
     // Abort any existing in-flight request before starting a new action
     if (abortControllerRef.current) {
@@ -54,6 +60,20 @@ export function useTypeahead(options: UseTypeaheadOptions = {}): UseTypeaheadRet
     if (trimmed.length < minChars) {
       setResults([]);
       setStatus('idle');
+      setError(null);
+      return;
+    }
+
+    // Check bounded LRU cache for existing successful result
+    if (cacheRef.current.has(normalizedKey)) {
+      const cached = cacheRef.current.get(normalizedKey)!;
+
+      // Re-accessed entries become most recently used
+      cacheRef.current.delete(normalizedKey);
+      cacheRef.current.set(normalizedKey, cached);
+
+      setResults(cached);
+      setStatus('success');
       setError(null);
       return;
     }
@@ -75,6 +95,18 @@ export function useTypeahead(options: UseTypeaheadOptions = {}): UseTypeaheadRet
       }
 
       if (Array.isArray(data) && data.length > 0) {
+        // Cache successful result arrays only
+        const cache = cacheRef.current;
+        cache.delete(normalizedKey);
+        cache.set(normalizedKey, data);
+
+        if (cache.size > MAX_CACHE_SIZE) {
+          const oldestKey = cache.keys().next().value;
+          if (oldestKey !== undefined) {
+            cache.delete(oldestKey);
+          }
+        }
+
         setResults(data);
         setStatus('success');
         setError(null);

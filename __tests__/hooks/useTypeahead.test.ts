@@ -288,4 +288,206 @@ describe('useTypeahead hook', () => {
 
     expect(requestAborted).toBe(true);
   });
+
+  describe('Bounded LRU Cache behaviour', () => {
+    it('serves repeated queries from cache and avoids redundant network requests', async () => {
+      let networkCalls = 0;
+      server.use(
+        http.get('*/api/places', ({ request }) => {
+          networkCalls++;
+          const url = new URL(request.url);
+          const q = url.searchParams.get('q');
+          return HttpResponse.json([
+            { id: 1, name: q || 'Place', lat: 10, lon: 20 },
+          ]);
+        })
+      );
+
+      const { result } = renderHook(() => useTypeahead({ debounceMs: 100 }));
+
+      // 1. Initial query for "Paris" -> triggers network call
+      act(() => {
+        result.current.setQuery('Paris');
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      expect(result.current.status).toBe('success');
+      expect(result.current.results[0]?.name).toBe('Paris');
+      expect(networkCalls).toBe(1);
+
+      // 2. Query for "London" -> triggers network call
+      act(() => {
+        result.current.setQuery('London');
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      expect(result.current.status).toBe('success');
+      expect(result.current.results[0]?.name).toBe('London');
+      expect(networkCalls).toBe(2);
+
+      // 3. Repeat query for "Paris" -> cache hit, avoids network call
+      act(() => {
+        result.current.setQuery('Paris');
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      expect(result.current.status).toBe('success');
+      expect(result.current.results[0]?.name).toBe('Paris');
+      expect(networkCalls).toBe(2); // Still 2 calls, network was avoided
+    });
+
+    it('normalizes query casing and whitespace for cache hits', async () => {
+      let networkCalls = 0;
+      server.use(
+        http.get('*/api/places', () => {
+          networkCalls++;
+          return HttpResponse.json([
+            { id: 2, name: 'Berlin', lat: 52.5, lon: 13.4 },
+          ]);
+        })
+      );
+
+      const { result } = renderHook(() => useTypeahead({ debounceMs: 100 }));
+
+      // Initial query with standard casing
+      act(() => {
+        result.current.setQuery('Berlin');
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      expect(result.current.status).toBe('success');
+      expect(networkCalls).toBe(1);
+
+      // Query with mixed case and surrounding whitespace
+      act(() => {
+        result.current.setQuery('   bErLiN   ');
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      expect(result.current.status).toBe('success');
+      expect(result.current.results[0]?.name).toBe('Berlin');
+      expect(networkCalls).toBe(1); // Served from cache
+    });
+
+    it('evicts the least recently used entry when exceeding the 50-item limit and preserves re-accessed entries', async () => {
+      const callCounts: Record<string, number> = {};
+      server.use(
+        http.get('*/api/places', ({ request }) => {
+          const url = new URL(request.url);
+          const q = url.searchParams.get('q') || '';
+          callCounts[q] = (callCounts[q] || 0) + 1;
+          return HttpResponse.json([
+            { id: Math.random(), name: `Result for ${q}`, lat: 0, lon: 0 },
+          ]);
+        })
+      );
+
+      const { result } = renderHook(() => useTypeahead({ debounceMs: 50 }));
+
+      // Fill cache with 50 distinct items: city-00 through city-49
+      for (let i = 0; i < 50; i++) {
+        const queryName = `city-${i.toString().padStart(2, '0')}`;
+        act(() => {
+          result.current.setQuery(queryName);
+        });
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(50);
+        });
+        expect(callCounts[queryName]).toBe(1);
+      }
+
+      // Re-access city-00 -> makes it the most recently used (city-01 is now the oldest/LRU)
+      act(() => {
+        result.current.setQuery('city-00');
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(callCounts['city-00']).toBe(1); // Cache hit, no extra network call
+
+      // Add 51st item: city-50 -> exceeds limit (50), evicting LRU item (city-01)
+      act(() => {
+        result.current.setQuery('city-50');
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(callCounts['city-50']).toBe(1);
+
+      // Verify city-00 is STILL in cache (not evicted because it was re-accessed)
+      act(() => {
+        result.current.setQuery('city-00');
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(callCounts['city-00']).toBe(1); // Still 1 call (cache hit)
+
+      // Verify city-01 was evicted -> triggers a new network call
+      act(() => {
+        result.current.setQuery('city-01');
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(callCounts['city-01']).toBe(2); // Second network call triggered due to eviction
+    });
+
+    it('does not cache error states or loading states', async () => {
+      let attempt = 0;
+      server.use(
+        http.get('*/api/places', () => {
+          attempt++;
+          if (attempt === 1) {
+            return HttpResponse.json({ error: 'Server unavailable' }, { status: 500 });
+          }
+          return HttpResponse.json([
+            { id: 10, name: 'RetrySuccess', lat: 10, lon: 20 },
+          ]);
+        })
+      );
+
+      const { result } = renderHook(() => useTypeahead({ debounceMs: 100 }));
+
+      // First query fails
+      act(() => {
+        result.current.setQuery('failQuery');
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      expect(result.current.status).toBe('error');
+      expect(attempt).toBe(1);
+
+      // Second query for same term should NOT return cached error and must make a new network request
+      act(() => {
+        result.current.setQuery('otherQuery');
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      act(() => {
+        result.current.setQuery('failQuery');
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      expect(result.current.status).toBe('success');
+      expect(result.current.results[0]?.name).toBe('RetrySuccess');
+      expect(attempt).toBe(3);
+    });
+  });
 });
