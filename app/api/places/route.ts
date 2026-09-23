@@ -1,10 +1,45 @@
 import { NextResponse } from 'next/server';
 import type { OpenMeteoResponse, Place, ApiErrorResponse } from '@/types/places';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 const UPSTREAM_BASE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 const REQUEST_TIMEOUT_MS = 5000;
 
+/**
+ * Executes upstream fetch with 5-second timeout and 1 controlled retry on 5xx status codes.
+ */
+async function fetchUpstreamWithRetry(upstreamUrl: string): Promise<Response> {
+  let response = await fetch(upstreamUrl, {
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  // Controlled 1-retry fallback for upstream 5xx errors
+  if (response.status >= 500 && response.status < 600) {
+    response = await fetch(upstreamUrl, {
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  }
+
+  return response;
+}
+
 export async function GET(request: Request): Promise<NextResponse<Place[] | ApiErrorResponse>> {
+  // Check rate limit per client IP
+  const clientIp = getClientIp(request);
+  const { allowed, retryAfterSeconds } = checkRateLimit(clientIp);
+
+  if (!allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please try again later.' },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(retryAfterSeconds),
+        },
+      }
+    );
+  }
+
   const { searchParams } = new URL(request.url);
   const rawQuery = searchParams.get('q');
 
@@ -30,9 +65,7 @@ export async function GET(request: Request): Promise<NextResponse<Place[] | ApiE
   )}&count=8&language=en&format=json`;
 
   try {
-    const response = await fetch(upstreamUrl, {
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
+    const response = await fetchUpstreamWithRetry(upstreamUrl);
 
     if (!response.ok) {
       return NextResponse.json(
@@ -61,7 +94,12 @@ export async function GET(request: Request): Promise<NextResponse<Place[] | ApiE
       return place;
     });
 
-    return NextResponse.json(places);
+    return NextResponse.json(places, {
+      status: 200,
+      headers: {
+        'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+      },
+    });
   } catch (error) {
     // Return 502 Bad Gateway on fetch timeout or network failure
     const isTimeout =
