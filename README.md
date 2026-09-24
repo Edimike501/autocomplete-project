@@ -20,7 +20,7 @@ This project uses the **Open-Meteo Geocoding API** (`https://geocoding-api.open-
 
 ---
 
-## Architecture
+## Architecture Pattern
 
 The system follows a strict three-tier separation of concerns:
 
