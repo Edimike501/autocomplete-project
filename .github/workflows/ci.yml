@@ -1,4 +1,4 @@
-name: CI
+name: Typecheck, Lint, Test & Build
 
 on:
   push:
