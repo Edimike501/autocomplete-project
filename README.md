@@ -13,13 +13,14 @@ The Expert Listing Typeahead provides an accessible search interface for looking
 ## Why this API
 
 This project uses the **Open-Meteo Geocoding API** (`https://geocoding-api.open-meteo.com/v1/search`) because:
+
 - **No API Key Requirements**: Eliminates authentication barriers during evaluation and local development.
 - **Global & Regional Coverage**: High-quality geocoding data for Nigerian cities (Lagos, Abuja, Port Harcourt, Enugu) and international locations.
 - **Clean Geospatial Metadata**: Returns structured geographic properties (place name, administrative regions, country, latitude, longitude) suitable for location-based property listing workflows.
 
 ---
 
-## Architecture
+## Architecture Pattern
 
 The system follows a strict three-tier separation of concerns:
 
@@ -65,6 +66,7 @@ The system follows a strict three-tier separation of concerns:
 In async typeahead systems, out-of-order network responses represent a critical race condition (e.g. searching `"lag"` followed rapidly by `"lagos"`—if `"lag"` resolves after `"lagos"`, stale results could overwrite newer results).
 
 This project implements dual-layer protection:
+
 1. **`AbortController` Cancellation**: When a new query is initiated or when the component unmounts, any pending in-flight request is immediately aborted via `controller.abort()`.
 2. **Monotonic Request Sequence IDs (`requestIdRef`)**: Each fetch is assigned an incrementing integer request sequence ID. Before state updates or cache writes occur, the response verifies `currentRequestId === requestIdRef.current && !controller.signal.aborted`. Out-of-order or superseded responses are discarded immediately.
 
@@ -73,6 +75,7 @@ This project implements dual-layer protection:
 ## Accessibility
 
 The interface is built against the **WAI-ARIA 1.2 Combobox Pattern**:
+
 - **Semantic ARIA Attributes**:
   - `role="combobox"` on the search input with `aria-autocomplete="list"`, `aria-haspopup="listbox"`, and `aria-expanded` reflecting dropdown visibility.
   - `role="listbox"` with `id="typeahead-listbox"` and `aria-label="Place suggestions"`.
@@ -104,9 +107,10 @@ The interface is built against the **WAI-ARIA 1.2 Combobox Pattern**:
 ## Server Hardening
 
 The `/api/places` route handler includes production-minded protections:
+
 - **Cache-Control Headers**: Successful 200 responses return `Cache-Control: public, s-maxage=3600, stale-while-revalidate=86400`.
 - **Request Rate Limiting**: In-memory per-IP limiter allowing 60 requests per minute. Exceeding limits returns `429 Too Many Requests` with a dynamic `Retry-After` header.
-  > *Note: This in-memory limiter is suitable for the demo. Production deployments should use a shared store such as Redis or an edge-provider rate limiter.*
+  > _Note: This in-memory limiter is suitable for the demo. Production deployments should use a shared store such as Redis or an edge-provider rate limiter._
 - **Controlled 5xx Retry**: When upstream returns a 5xx status code (`500`-`599`), the handler attempts 1 controlled retry before returning `502 Bad Gateway`.
 - **5-Second Timeout**: Every upstream request is guarded by `AbortSignal.timeout(5000)`.
 
@@ -140,6 +144,7 @@ The repository maintains automated test suites across three distinct testing tie
 ## Scaling Path
 
 For production deployment at enterprise scale, recommended enhancements include:
+
 1. **Distributed Rate Limiting**: Migrate from in-memory Map to Upstash Redis or Vercel Edge Middleware rate limiting.
 2. **Dedicated Search Index**: Index location listings in Elasticsearch, Typesense, or Meilisearch with prefix matching, phonetic typo tolerance, and edge ngram tokenization.
 3. **Geo-Biased Ranking**: Bias search results based on user geolocation headers (`x-vercel-ip-latitude`, `x-vercel-ip-longitude`) to rank nearby properties higher.
@@ -157,10 +162,12 @@ For production deployment at enterprise scale, recommended enhancements include:
 ## Running Locally
 
 ### Prerequisites
+
 - Node.js 18.18+ or 20+
 - `pnpm` (or `npm`)
 
 ### Installation
+
 ```bash
 # Clone the repository
 git clone https://github.com/Edimike501/autocomplete-project.git
@@ -171,12 +178,14 @@ pnpm install
 ```
 
 ### Development Server
+
 ```bash
 pnpm run dev
 # Open http://localhost:3000 in your browser
 ```
 
 ### Running Tests
+
 ```bash
 # Run unit, contract, and integration tests
 pnpm test
@@ -186,6 +195,7 @@ pnpm run test:e2e
 ```
 
 ### Quality Checks & Build
+
 ```bash
 # Typecheck
 pnpm run typecheck
@@ -215,3 +225,11 @@ dbf74b1 test: stabilize typeahead integration boundaries
 dfaeefc feat(api): add validated places route with timeout and normalized response
 1fa880b Initial commit
 ```
+
+---
+
+## CI/CD
+
+- GitHub Actions runs typecheck, lint, unit tests, and Playwright E2E tests on every pull request.
+- `main` is protected: PRs cannot merge until all required checks pass.
+- Vercel deploys automatically from `main`, so production only ever reflects commits that passed CI.
